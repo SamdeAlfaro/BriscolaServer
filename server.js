@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 app.use(cors());
@@ -17,6 +18,12 @@ const io = socketIo(server, {
     credentials: true
   }
 });
+
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100 // limit each IP to 100 requests per windowMs
+});
+app.use(limiter);
 
 const gameRooms = new Map();
 
