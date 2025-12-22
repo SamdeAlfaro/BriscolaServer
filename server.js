@@ -9,7 +9,10 @@ app.use(cors());
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: true,
+    origin: [
+      "https://briscola-client.vercel.app", // Your Vercel URL
+      "http://localhost:3000" // For local testing
+    ],
     methods: ["GET", "POST"],
     credentials: true
   }
