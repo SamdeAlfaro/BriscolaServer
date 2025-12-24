@@ -12,7 +12,8 @@ const io = socketIo(server, {
   cors: {
     origin: [
       "https://briscola-client.vercel.app", // Your Vercel URL
-      "http://localhost:3000" // For local testing
+      "http://localhost:3000",
+      "http://localhost:3002" // For local testing
     ],
     methods: ["GET", "POST"],
     credentials: true
@@ -72,7 +73,7 @@ io.on('connection', (socket) => {
       player1: socket.id,
       player2: null,
       gameState: null,
-      phase: 'waiting', // waiting, rolling_dice, shuffling, cutting, playing, trick_complete, drawing, counting, game_over
+      phase: 'waiting',
       player1Name: 'Player 1',
       player2Name: 'Player 2'
     });
@@ -117,8 +118,12 @@ io.on('connection', (socket) => {
       } else {
         dealer = 2;
         nonDealer = 1;
-        // Swap players
+        // Swap players AND update their player numbers
         [room.player1, room.player2] = [room.player2, room.player1];
+        
+        // Notify each player of their new player number
+        io.to(room.player1).emit('playerNumberUpdate', { playerNumber: 1 });
+        io.to(room.player2).emit('playerNumberUpdate', { playerNumber: 2 });
       }
       
       io.to(roomCode).emit('diceRolled', { 
@@ -316,6 +321,7 @@ function finishTrick(roomCode, winner) {
   
   gameState.currentTrick = [];
   room.phase = 'playing';
+  // FIXED: Winner of trick plays first in next trick
   gameState.currentPlayer = winner;
   
   // Check if game is over
@@ -381,36 +387,65 @@ function sendGameStateToPlayers(roomCode) {
   }
 }
 
+// FIXED: Correct trick winner determination according to Briscola rules
+// Italian deck: 1=Asso, 2-7=number cards, 8=Fante(Jack), 9=Cavallo(Queen), 10=Re(King)
 function determineTrickWinner(trick, trumpSuit) {
   const [first, second] = trick;
   
-  if (second.card.suit === trumpSuit && first.card.suit !== trumpSuit) {
+  const isTrump1 = first.card.suit === trumpSuit;
+  const isTrump2 = second.card.suit === trumpSuit;
+  const sameSuit = first.card.suit === second.card.suit;
+  
+  // RULE 3: If one card is trump and the other isn't, trump wins
+  if (isTrump1 && !isTrump2) {
+    return first.player;
+  }
+  if (isTrump2 && !isTrump1) {
     return second.player;
   }
   
-  if (first.card.suit === trumpSuit && second.card.suit !== trumpSuit) {
-    return first.player;
+  // RULE 1: If both cards are the same suit (including both trump), 
+  // higher rank wins
+  if (sameSuit) {
+    return getCardRank(first.card) > getCardRank(second.card) ? first.player : second.player;
   }
   
-  if (first.card.suit === second.card.suit) {
-    return getCardStrength(first.card) > getCardStrength(second.card) ? first.player : second.player;
-  }
-  
+  // RULE 2: Different suits, neither is trump - first player wins
   return first.player;
 }
 
-function getCardStrength(card) {
-  const strengths = {
-    1: 11, 3: 10, 10: 4, 9: 3, 8: 2,
-    7: 0, 6: 0, 5: 0, 4: 0, 2: 0
+// FIXED: Correct card ranking for Italian deck
+// Ranking: Asso(1) > Tre(3) > Re(10) > Cavallo(9) > Fante(8) > 7 > 6 > 5 > 4 > 2
+function getCardRank(card) {
+  const ranks = {
+    1: 11,   // Asso (Ace) - highest rank
+    3: 10,   // Tre (Three)
+    10: 9,   // Re (King)
+    9: 8,    // Cavallo (Queen/Knight)
+    8: 7,    // Fante (Jack)
+    7: 6,
+    6: 5,
+    5: 4,
+    4: 3,
+    2: 2     // Due (Two) - lowest rank
   };
-  return strengths[card.value] || 0;
+  return ranks[card.value] || 0;
 }
 
+// FIXED: Correct point values for Italian cards
+// Points: Asso=11, Tre=10, Re=4, Cavallo=3, Fante=2, others=0
 function calculateTrickPoints(trick) {
   const pointValues = {
-    1: 11, 3: 10, 10: 4, 9: 3, 8: 2,
-    7: 0, 6: 0, 5: 0, 4: 0, 2: 0
+    1: 11,   // Asso (Ace): 11 points
+    3: 10,   // Tre (Three): 10 points
+    10: 4,   // Re (King): 4 points
+    9: 3,    // Cavallo (Queen/Knight): 3 points
+    8: 2,    // Fante (Jack): 2 points
+    7: 0,
+    6: 0,
+    5: 0,
+    4: 0,
+    2: 0
   };
   
   return trick.reduce((sum, { card }) => sum + (pointValues[card.value] || 0), 0);
