@@ -12,7 +12,8 @@ const io = socketIo(server, {
   cors: {
     origin: [
       "https://briscola-client.vercel.app", // Your Vercel URL
-      "http://localhost:3000",
+      "https://personal-website-swart-nine-92.vercel.app/briscola",
+      "http://localhost:3000/briscola",
       "http://localhost:3002" // For local testing
     ],
     methods: ["GET", "POST"],
