@@ -12,7 +12,7 @@ const io = socketIo(server, {
   cors: {
     origin: [
       "https://briscola-client.vercel.app", // Your Vercel URL
-      "https://personal-website-swart-nine-92.vercel.app/briscola",
+      "https://personal-website-swart-nine-92.vercel.app",
       "http://localhost:3000/briscola",
       "http://localhost:3002" // For local testing
     ],
