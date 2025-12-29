@@ -11,8 +11,7 @@ const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
     origin: [
-      "https://briscola-client.vercel.app", // Your Vercel URL
-      "https://personal-website-swart-nine-92.vercel.app",
+      "https://personal-website-inky-six-68.vercel.app",
       "http://localhost:3000/briscola",
       "http://localhost:3002" // For local testing
     ],
