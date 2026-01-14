@@ -63,6 +63,72 @@ function shuffleDeck(deck) {
   return shuffled;
 }
 
+function startNewRound(roomCode, swapDealer = false) {
+  const room = gameRooms.get(roomCode);
+  if (!room) return;
+
+  // If swapping dealer, swap the player positions
+  if (swapDealer) {
+    [room.player1, room.player2] = [room.player2, room.player1];
+    
+    // Notify players of their new player numbers
+    io.to(room.player1).emit('playerNumberUpdate', { playerNumber: 1 });
+    io.to(room.player2).emit('playerNumberUpdate', { playerNumber: 2 });
+  }
+
+  // Reset game state
+  room.gameState = null;
+  room.phase = 'rolling_dice';
+  
+  // Start dice roll animation
+  io.to(roomCode).emit('startDiceRoll');
+  
+  // Roll dice after 2 seconds
+  setTimeout(() => {
+    const dice1 = Math.floor(Math.random() * 6) + 1;
+    const dice2 = Math.floor(Math.random() * 6) + 1;
+    
+    // Higher roll becomes player 1 (dealer)
+    let dealer, nonDealer;
+    if (dice1 >= dice2) {
+      dealer = 1;
+      nonDealer = 2;
+    } else {
+      dealer = 2;
+      nonDealer = 1;
+      // Swap players AND update their player numbers
+      [room.player1, room.player2] = [room.player2, room.player1];
+      
+      // Notify each player of their new player number
+      io.to(room.player1).emit('playerNumberUpdate', { playerNumber: 1 });
+      io.to(room.player2).emit('playerNumberUpdate', { playerNumber: 2 });
+    }
+    
+    io.to(roomCode).emit('diceRolled', { 
+      dice1, 
+      dice2, 
+      dealer,
+      message: `Player ${dealer} rolled ${dealer === 1 ? dice1 : dice2}, Player ${nonDealer} rolled ${nonDealer === 1 ? dice1 : dice2}. Player ${dealer} deals!`
+    });
+    
+    // Start shuffle after 3 seconds
+    setTimeout(() => {
+      room.phase = 'shuffling';
+      const deck = createDeck();
+      io.to(roomCode).emit('startShuffle', { deck });
+      
+      // After shuffle animation (3 seconds), let player 2 cut
+      setTimeout(() => {
+        const shuffledDeck = shuffleDeck(deck);
+        room.shuffledDeck = shuffledDeck;
+        room.phase = 'cutting';
+        io.to(room.player2).emit('yourTurnToCut');
+        io.to(room.player1).emit('opponentCutting');
+      }, 3000);
+    }, 3000);
+  }, 2000);
+}
+
 io.on('connection', (socket) => {
   console.log('New client connected:', socket.id);
 
@@ -101,54 +167,8 @@ io.on('connection', (socket) => {
     
     socket.emit('roomJoined', { roomCode, playerNumber: 2 });
     
-    // Start dice roll animation
-    room.phase = 'rolling_dice';
-    io.to(roomCode).emit('startDiceRoll');
-    
-    // Roll dice after 2 seconds
-    setTimeout(() => {
-      const dice1 = Math.floor(Math.random() * 6) + 1;
-      const dice2 = Math.floor(Math.random() * 6) + 1;
-      
-      // Higher roll becomes player 1 (dealer)
-      let dealer, nonDealer;
-      if (dice1 >= dice2) {
-        dealer = 1;
-        nonDealer = 2;
-      } else {
-        dealer = 2;
-        nonDealer = 1;
-        // Swap players AND update their player numbers
-        [room.player1, room.player2] = [room.player2, room.player1];
-        
-        // Notify each player of their new player number
-        io.to(room.player1).emit('playerNumberUpdate', { playerNumber: 1 });
-        io.to(room.player2).emit('playerNumberUpdate', { playerNumber: 2 });
-      }
-      
-      io.to(roomCode).emit('diceRolled', { 
-        dice1, 
-        dice2, 
-        dealer,
-        message: `Player ${dealer} rolled ${dealer === 1 ? dice1 : dice2}, Player ${nonDealer} rolled ${nonDealer === 1 ? dice1 : dice2}. Player ${dealer} deals!`
-      });
-      
-      // Start shuffle after 3 seconds
-      setTimeout(() => {
-        room.phase = 'shuffling';
-        const deck = createDeck();
-        io.to(roomCode).emit('startShuffle', { deck });
-        
-        // After shuffle animation (3 seconds), let player 2 cut
-        setTimeout(() => {
-          const shuffledDeck = shuffleDeck(deck);
-          room.shuffledDeck = shuffledDeck;
-          room.phase = 'cutting';
-          io.to(room.player2).emit('yourTurnToCut');
-          io.to(room.player1).emit('opponentCutting');
-        }, 3000);
-      }, 3000);
-    }, 2000);
+    // Start the first round
+    startNewRound(roomCode, false);
     
     console.log(`Player joined room: ${roomCode}`);
   });
@@ -254,6 +274,31 @@ io.on('connection', (socket) => {
       gameState.currentPlayer = playerNumber === 1 ? 2 : 1;
       sendGameStateToPlayers(roomCode);
     }
+  });
+
+  socket.on('requestReplay', ({ roomCode }) => {
+    const room = gameRooms.get(roomCode);
+    if (!room) return;
+    
+    console.log(`Replay requested for room: ${roomCode}`);
+    
+    // Start new round with swapped dealer
+    startNewRound(roomCode, true);
+  });
+
+  socket.on('quitGame', ({ roomCode }) => {
+    const room = gameRooms.get(roomCode);
+    if (!room) return;
+    
+    // Notify other player
+    const otherPlayer = room.player1 === socket.id ? room.player2 : room.player1;
+    if (otherPlayer) {
+      io.to(otherPlayer).emit('opponentLeftGame');
+    }
+    
+    // Clean up room
+    gameRooms.delete(roomCode);
+    console.log(`Room deleted: ${roomCode}`);
   });
 
   socket.on('disconnect', () => {
