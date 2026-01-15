@@ -3,6 +3,7 @@ const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const crypto = require('crypto');
 
 const app = express();
 app.use(cors());
@@ -54,10 +55,17 @@ function createDeck() {
   return deck;
 }
 
+function rollDice() {
+  // Use cryptographically secure random for fair dice rolls
+  return crypto.randomInt(1, 7); // Returns 1-6 inclusive
+}
+
 function shuffleDeck(deck) {
+  // Fisher-Yates shuffle with cryptographically secure randomness
   const shuffled = [...deck];
   for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    // Use crypto.randomInt for cryptographically secure randomness
+    const j = crypto.randomInt(0, i + 1);
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
   return shuffled;
@@ -66,6 +74,8 @@ function shuffleDeck(deck) {
 function startNewRound(roomCode, swapDealer = false) {
   const room = gameRooms.get(roomCode);
   if (!room) return;
+
+  const isFirstGame = !swapDealer; // First game doesn't swap, replays do
 
   // If swapping dealer, swap the player positions
   if (swapDealer) {
@@ -80,13 +90,14 @@ function startNewRound(roomCode, swapDealer = false) {
   room.gameState = null;
   room.phase = 'rolling_dice';
   
-  // Start dice roll animation
-  io.to(roomCode).emit('startDiceRoll');
+  // Start dice roll (or skip for replays)
+  io.to(roomCode).emit('startDiceRoll', { isFirstGame });
   
-  // Roll dice after 2 seconds
+  // Roll dice after 2 seconds (only for first game)
+  const diceDelay = isFirstGame ? 2000 : 0;
   setTimeout(() => {
-    const dice1 = Math.floor(Math.random() * 6) + 1;
-    const dice2 = Math.floor(Math.random() * 6) + 1;
+    const dice1 = rollDice();
+    const dice2 = rollDice();
     
     // Higher roll becomes player 1 (dealer)
     let dealer, nonDealer;
@@ -108,10 +119,12 @@ function startNewRound(roomCode, swapDealer = false) {
       dice1, 
       dice2, 
       dealer,
-      message: `Player ${dealer} rolled ${dealer === 1 ? dice1 : dice2}, Player ${nonDealer} rolled ${nonDealer === 1 ? dice1 : dice2}. Player ${dealer} deals!`
+      message: `Player ${dealer} rolled ${dealer === 1 ? dice1 : dice2}, Player ${nonDealer} rolled ${nonDealer === 1 ? dice1 : dice2}. Player ${dealer} deals!`,
+      isFirstGame
     });
     
-    // Start shuffle after 3 seconds
+    // Start shuffle after 3 seconds (or immediately for replays)
+    const shuffleDelay = isFirstGame ? 3000 : 0;
     setTimeout(() => {
       room.phase = 'shuffling';
       const deck = createDeck();
@@ -125,8 +138,8 @@ function startNewRound(roomCode, swapDealer = false) {
         io.to(room.player2).emit('yourTurnToCut');
         io.to(room.player1).emit('opponentCutting');
       }, 3000);
-    }, 3000);
-  }, 2000);
+    }, shuffleDelay);
+  }, diceDelay);
 }
 
 io.on('connection', (socket) => {
